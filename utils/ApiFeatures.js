@@ -11,9 +11,6 @@ class ApiFeatures {
         // search fields for each model
         const searchFields = {
             User: ["firstName","lastName","email","phone"],
-            City: ["nameAr", "nameEn"],
-            Country: ["nameAr", "nameEn"],
-            Stadium: ["stadiumName"],
         };
 
         const fields = searchFields[this.modelName];
