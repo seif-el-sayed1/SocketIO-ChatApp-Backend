@@ -142,7 +142,95 @@ class UserController {
       }
   });
 
-  
+  // @desc    Sign Up
+  // @route   POST /user/auth/register
+  // @access  Public
+  userRegister = async (req, res, next) => {
+    console.log("++++++++++++++++++++++++");
+    console.log(req.body.notificationToken);
+    console.log("++++++++++++++++++++++++");
+
+    const session = await mongoose.startSession();
+    try {
+        session.startTransaction();
+
+        console.log(" 🚀~ Req.body ~ in User register", req.body);
+
+        // Create a new user
+        let user = await User.create(
+            [
+                {
+                    firstName: req.body.firstName,
+                    lastName: req.body.lastName,
+                    genderAr: req.body.genderAr,
+                    genderEn: req.body.genderEn,
+                    email: req.body.email,
+                    dateOfBirth: req.body.dateOfBirth,
+                    profilePicture: req.body.image || req.body.profilePicture,
+                    loginType: req.body.loginType,
+                    notificationToken: req.body.notificationToken,
+                    password: req.body.password
+                }
+            ],
+            { session }
+        );
+        user = user[0];
+
+        // Generate a verification code
+        const { code, hashedCode } = await generateCode();
+        user.verificationCode = hashedCode;
+        user.verificationCodeExp = Date.now() + 10 * 60 * 1000;
+
+        await user.save({ session });
+
+        const { email, loginType } = req.body;
+
+        // For non-email login types, mark as verified immediately
+        if (loginType && loginType !== "email") {
+            user.isVerified = true;
+            const token = await user.generateToken();
+            await user.save({ session });
+            await session.commitTransaction();
+
+            user = await User.findById(user._id, null, {
+                lang: req.headers.lang,
+                userLocationPopulation: true
+            });
+
+            res.status(200).json({
+                success: true,
+                message: "Account Created and verified successfully",
+                data: {
+                    ...this.#getUsersData(user, req.headers.lang),
+                    ...token
+                }
+            });
+        } else if (email) {
+            // Send verification email only
+            await userVerificationEmail(code, email);
+            await session.commitTransaction();
+
+            user = await User.findById(user._id, null, {
+                lang: req.headers.lang,
+                userLocationPopulation: true
+            });
+
+            res.status(200).json({
+                success: true,
+                message: "Verification OTP is sent to your Email",
+                data: {
+                    ...this.#getUsersData(user, req.headers.lang)
+                }
+            });
+        }
+    } catch (err) {
+        await session.abortTransaction();
+        next(err);
+    } finally {
+        session.endSession();
+    }
+  };
+
 }
 
 module.exports = new UserController();
