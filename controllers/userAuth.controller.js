@@ -272,6 +272,28 @@ class UserController {
     });
   });
 
+  // @desc    Update logged user password
+  // @route   PATCH /user/auth/change-password
+  // @access  Private
+  updateLoggedUserPassword = asyncHandler(async (req, res, next) => { 
+    const lang = req.headers.lang || "en";
+
+    if (!(await req.user.comparePassword(req.body.currentPassword)))
+      return next(new ApiError(translate("Incorrect password", lang), 401));
+
+    const user = await User.findById(req.user._id);
+    if (!user) return next(new ApiError("User not found!", 404));
+
+    user.password = req.body.newPassword;
+    user.passwordChangedAt = Date.now();
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Password updated successfully, please login again"
+    });
+  });
+
 
   
 }
