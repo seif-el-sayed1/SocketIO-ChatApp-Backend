@@ -6,8 +6,6 @@ const {
   USER,
   LOGIN_TYPE_LIST,
 } = require("../utils/constants");
-const capitalizeFirstLetter = require("../utils/capitalizeFirstLetter");
-const localizationSetUp = require("../utils/modelLocalizationSetUp");
 
 const userSchema = mongoose.Schema(
   {
@@ -25,23 +23,19 @@ const userSchema = mongoose.Schema(
       type: String,
       trim: true
     },
+    lastName: {
+      type: String,
+      trim: true
+    },
     role: {
       type: String,
       enum: [USER],
       default: USER
     },
-    lastName: {
-      type: String,
-      trim: true
-    },
-    genderEn: {
+    gender: {
       type: String,
       enum: ["male", "female"],
       lower: true
-    },
-    genderAr: {
-      type: String,
-      enum: ["ذكر", "أنثى"]
     },
     email: {
       type: String,
@@ -50,10 +44,6 @@ const userSchema = mongoose.Schema(
     },
     dateOfBirth: {
       type: Date
-    },
-    phone: {
-      type: String,
-      trim: true
     },
     profilePicture: {
       type: String,
@@ -91,11 +81,21 @@ const userSchema = mongoose.Schema(
       type: Boolean,
       default: false
     },
+    blockedUsers: {
+      type: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User"
+        }
+      ],
+      default: []
+    },
+    unverifiedEmail: { type: String },
     token: String,
     tokenExpDate: Date,
     notificationToken: String,
   },
-  { timestamps: true, discriminatorKey: "role" }
+  { timestamps: true }
 );
 userSchema.index({ location: "2dsphere" });
 
@@ -114,13 +114,6 @@ userSchema.index(
     partialFilterExpression: { email: { $exists: true } } // Apply uniqueness only when `email` is not null
   }
 );
-
-// Model Localization
-userSchema.set("toJSON", {
-  virtuals: true,
-  transform: localizationSetUp(["gender"])
-});
-
 userSchema.virtual("fullName").get(function () {
   // this to capitalize first & last name of fullName
   if (this.firstName && this.lastName)
@@ -172,39 +165,6 @@ userSchema.methods.generateToken = async function () {
 
   return { token, tokenExpDate };
 };
-
-userSchema.pre(/\bfind/, function (next) {
-  let lang = this.getOptions().lang || this.lang || "en";
-  if (this.getOptions().userLocationPopulation) {
-    this.populate({
-      path: "city",
-      model: "City",
-      select: `_id ${
-        lang ? (lang === "all" ? "nameEn nameAr" : `name${capitalizeFirstLetter(lang)}`) : "nameEn"
-      }`
-    });
-
-//     this.populate({
-//       path: "region",
-//       model: "Region",
-//       select: `_id ${
-//         lang ? (lang === "all" ? "nameEn nameAr" : `name${capitalizeFirstLetter(lang)}`) : "nameEn"
-//       }`
-//     });
-
-    this.populate({
-      path: "country",
-      model: "Country",
-      select: `_id ${
-        lang ? (lang === "all" ? "nameEn nameAr" : `name${capitalizeFirstLetter(lang)}`) : "nameEn"
-      }`
-    });
-  }
-
-  if (this.getOptions().skipPopulation) return next();
-
-  next();
-});
 
 userSchema.methods.comparePassword = async function (password) {
   if (this.loginType !== "email") {
