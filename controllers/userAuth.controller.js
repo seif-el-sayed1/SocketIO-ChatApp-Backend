@@ -294,7 +294,55 @@ class UserController {
     });
   });
 
+  // @desc verify OTP
+  // @route POST /user/auth/verify-otp
+  // @access Private
+  verifyOtp = asyncHandler(async (req, res, next) => {
+    const lang = req.headers.lang || "en";
 
+    const hashedCode = hashCode(req.body.otp);
+    const user = await User.findOne(
+      {
+        verificationCode: hashedCode,
+        verificationCodeExp: { $gt: Date.now() }
+      },
+      null,
+      {
+        userLocationPopulation: true
+      }
+    );
+
+    if (!user)
+      return next(new ApiError(translate("OTP isn't found!", lang), 403));
+
+    let token = { token: user.token, tokenExpDate: user.tokenExpDate };
+
+    if (user.unverifiedPhone) {
+      if (user.phone) token = await user.generateToken();
+      user.phone = user.unverifiedPhone;
+      user.unverifiedPhone = undefined;
+    } else if (user.unverifiedEmail) {
+      if (user.email) token = await user.generateToken();
+      user.email = user.unverifiedEmail;
+      user.unverifiedEmail = undefined;
+    }
+
+    if (!token.token) token = await user.generateToken();
+
+    user.isVerified = true;
+    user.verificationCodeExp = undefined;
+    user.verificationCode = undefined;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Account verified successfully",
+      data: {
+        ...this.#getUsersData(user, lang),
+        ...token
+      }
+    });
+  });
   
 }
 
