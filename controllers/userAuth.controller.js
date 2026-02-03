@@ -344,6 +344,43 @@ class UserController {
     });
   });
   
+  //@desc sent OTP
+  //@route POST /user/auth/send-otp
+  //@access Private
+  sendOtp = asyncHandler(async (req, res, next) => {
+    let { phone, email } = req.body;
+    const userFilter = phone
+      ? { $or: [{ phone }, { unverifiedPhone: phone }] }
+      : { $or: [{ email }, { unverifiedEmail: email }] };
+    const user = await User.findOne(userFilter);
+    if (!user) return next(new ApiError(translate("User Not Found!", lang), 404));
+    const { code, hashedCode } = await generateCode();
+    user.verificationCode = hashedCode;
+    // Send verification mail
+    // Save hashed verification code in DB
+    user.verificationCode = hashedCode;
+    user.verificationCodeExp = Date.now() + 10 * 60 * 1000;
+    await user.save();
+
+    if (phone) {
+      const { success, error } = await phoneController.sendVerificationCode(req.body.phone, code);
+
+      if (success) {
+        res.status(200).json({
+          success: true,
+          message: "Verification OTP is sent to your Phone Number"
+        });
+      } else {
+        next(error);
+      }
+    } else if (email) {
+      await EmailController.userVerificationEmail(code, email);
+      res.status(200).json({
+        success: true,
+        message: "Verification OTP is sent to your Email"
+      });
+    }
+  });
 }
 
 module.exports = new UserController();
