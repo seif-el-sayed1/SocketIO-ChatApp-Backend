@@ -246,7 +246,7 @@ class SocketController {
         socket.emit("error", { message: error.message });
     }
   };
-
+  
   messagesDeliveredOnConnect = async (io, socket, userData, chatRoomUsers) => {
     try {
         let chats = await Chat.find({ participants: userData._id });
@@ -307,6 +307,59 @@ class SocketController {
         }
 
     } catch (error) {
+        socket.emit("error", { message: error.message });
+    }
+  };
+
+  messageDelivered = async (io, socket, userData, chatRoomUsers, { messageId }) => {
+    try {
+        const message = await Message.findById(messageId);
+        if (!message) return;
+
+        const chatId = message.chat.toString();
+        const chat = await Chat.findById(chatId);
+
+        if (!chat || !chat.participants.includes(userData._id.toString()))
+            return socket.emit("error", "Chat not found or unauthorized");
+
+        // Prepare update: mark as delivered, and read if user is active in the chat room
+        const updateBody = { isDelivered: true };
+        if (chatRoomUsers[chatId] && chatRoomUsers[chatId].has(userData._id.toString()))
+            updateBody.isRead = true;
+
+        // Update all messages up to this message timestamp
+        await Message.updateMany(
+            {
+                chat: chatId,
+                sender: { $ne: userData._id },
+                createdAt: { $lte: message.createdAt }
+            },
+            updateBody
+        );
+
+        // Find the other participant to notify
+        const otherUserId = chat.participants.find(
+            (participant) => participant.toString() !== userData._id.toString()
+        );
+
+        if (otherUserId) {
+            // Notify other participant that message is delivered
+            io.to(otherUserId.toString()).emit("message-delivered", {
+                chatId,
+                messageId: message._id,
+                messageTime: message.createdAt
+            });
+
+            // If user is active in chat, also mark as seen
+            if (chatRoomUsers[chatId] && chatRoomUsers[chatId].has(userData._id.toString()))
+                io.to(otherUserId.toString()).emit("messages-seen", {
+                    chatId,
+                    seenTime: new Date()
+                });
+        }
+
+    } catch (error) {
+        // Handle any errors
         socket.emit("error", { message: error.message });
     }
   };
