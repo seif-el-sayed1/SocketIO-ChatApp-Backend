@@ -84,3 +84,11 @@ module.exports = (server, app) => {
     }
   });
 };
+
+// Exports
+module.exports.chatRoomUsers = chatRoomUsers;
+module.exports.getIO = () => {
+  if (!io) throw new Error("Socket.io not initialized!");
+  return io;
+};
+module.exports.sendMediaNotification = sendMediaNotification;
