@@ -120,6 +120,133 @@ class SocketController {
     }
   };
 
+  sendChatMessage = async (io, socket, userData, chatRoomUsers, data, onlineUsers) => {
+    try {
+        let { content, chatId, otherUserId, type = "text" } = data;
+        let firstMsg = false;
+
+        if (chatId && otherUserId) {
+            socket.emit("error", "You can't send a message to a chat and a user at the same time");
+            return;
+        }
+
+        // Handle new chat creation if sending to a user directly
+        if (otherUserId) {
+            const otherUser = await User.findById(otherUserId).select("_id blockedUsers lang");
+            if (!otherUser) return socket.emit("error", "User not found");
+
+            // Check if either user has blocked the other
+            if (userData.blockedUsers.includes(otherUserId) || otherUser.blockedUsers.includes(userData._id))
+                return socket.emit("error", "You can't send a message to a blocked user");
+
+            // Find or create a 1-on-1 chat
+            let chat = await Chat.findOne({
+                participants: { $all: [userData._id, otherUserId], $size: 2 }
+            });
+            if (!chat) {
+                chat = await Chat.create({ participants: [userData._id, otherUserId] });
+                firstMsg = true; // mark as first message in this chat
+            }
+
+            // Join user to the chat room
+            socket.join(chat._id.toString());
+            if (!chatRoomUsers[chat._id]) chatRoomUsers[chat._id] = new Set();
+            chatRoomUsers[chat._id].add(userData._id.toString());
+            chatId = chat._id.toString();
+
+        } else if (chatId) {
+            // Handle sending message in an existing chat
+            const chat = await Chat.findById(chatId);
+            if (!chat || !chat.participants.includes(userData._id)) {
+                socket.emit("error", "Chat not found or unauthorized");
+                return;
+            }
+
+            const otherUser = await User.findById(chat.participants.find((p) => p !== userData._id))
+                .select("_id blockedUsers lang");
+            if (!otherUser) return socket.emit("error", "User not found");
+
+            // Check if either user has blocked the other
+            if (userData.blockedUsers.includes(otherUser._id) || otherUser.blockedUsers.includes(userData._id))
+                return socket.emit("error", "You can't send a message to a blocked user");
+        }
+
+        // Create and save the message
+        const msgBody = { chat: chatId, sender: userData._id, content, type, isDelivered: false, isRead: false };
+        const newMessage = await Message.create(msgBody);
+
+        // Fetch chat with participants populated
+        const chat = await Chat.findById(chatId).populate(
+            "participants",
+            "_id firstName lastName profilePicture notificationToken lang"
+        );
+
+        // Loop through participants to emit message events
+        for (let participant of chat.participants) {
+            // Determine if this message is the first message after chat cleared
+            if (chat && chat.clearedBy) {
+                if (chat.clearedBy.toString() === participant._id.toString()) {
+                    let messages = await Message.find({ chat: chat._id, createdAt: { $gt: chat.clearedAt } });
+                    firstMsg = messages.length === 0 || (messages.length === 1 && messages[0]._id.toString() === newMessage._id.toString());
+                } else firstMsg = false;
+            }
+
+            // Emit new-chat event if first message
+            if (firstMsg) {
+                const toParticipant = chat.participants.find(p => p._id.toString() !== participant._id.toString());
+                io.to(participant._id.toString()).emit("new-chat", {
+                    _id: chatId,
+                    to: {
+                        _id: otherUserId,
+                        profilePicture: toParticipant?.profilePicture || "",
+                        fullName: toParticipant?.firstName + " " + toParticipant.lastName
+                    },
+                    messages: [{
+                        _id: newMessage._id,
+                        sender: {
+                            _id: userData._id,
+                            fullName: participant._id.toString() === userData._id.toString() ? "You" : userData.firstName
+                        },
+                        content: newMessage.content,
+                        type: newMessage.type,
+                        isDelivered: newMessage.isDelivered,
+                        isRead: newMessage.isRead,
+                        isMyMsg: participant._id.toString() === userData._id.toString(),
+                        createdAt: newMessage.createdAt
+                    }],
+                    unreadMessagesCount: participant._id.toString() === userData._id.toString() ? 0 : 1,
+                    blocked: false
+                });
+            } else {
+                // Emit regular message event
+                io.to(participant._id.toString()).emit("message", {
+                    ...newMessage.toObject(),
+                    sender: undefined,
+                    isMyMsg: participant._id.toString() === userData._id.toString()
+                });
+            }
+        }
+
+        // Send push notification if other user is offline
+        const otherUser = chat.participants.find(p => p._id.toString() !== userData._id.toString());
+        if (otherUser.notificationToken &&
+            (!chatRoomUsers[chatId] || !chatRoomUsers[chatId]?.has(otherUser._id.toString()))) {
+            sendNotification({
+                token: otherUser.notificationToken,
+                title: `${translate("New message from", otherUser.lang)} ${userData.firstName || userData.entityName}`,
+                icon: userData?.icon,
+                body: content,
+                caseType: "chat",
+                info: chatId.toString(),
+                isDataOnly: true
+            });
+        }
+
+    } catch (error) {
+        socket.emit("error", { message: error.message });
+    }
+  };
+
 }
 
 module.exports = new SocketController();
