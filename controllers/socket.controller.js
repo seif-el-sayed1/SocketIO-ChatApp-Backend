@@ -364,6 +364,25 @@ class SocketController {
     }
   };
 
+  leaveChat = async (socket, userData, chatRoomUsers, { chatId }) => {
+    try {
+        // Leave the specific socket room
+        socket.leave(chatId.toString());
+
+        // Remove user from in-memory chatRoomUsers map
+        if (chatRoomUsers[chatId]) {
+            chatRoomUsers[chatId].delete(userData._id.toString());
+
+            // If no users left in this chat, remove the chat from map
+            if (chatRoomUsers[chatId].size === 0) delete chatRoomUsers[chatId];
+        }
+
+    } catch (error) {
+        socket.emit("error", { message: error.message });
+    }
+  };
+
+
 }
 
 module.exports = new SocketController();
