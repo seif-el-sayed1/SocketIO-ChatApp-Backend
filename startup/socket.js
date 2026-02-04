@@ -25,3 +25,19 @@ const getUserDetails = async (socket, token) => {
     socket.emit("error", "Authentication error: " + error.message);
   }
 };
+
+// Send notification for media messages if the user is offline
+const sendMediaNotification = ({ fromUser, toUser, roomId, image }) => {
+  if (chatRoomUsers[roomId]?.has(toUser._id.toString())) return; // user online, skip push
+  if (toUser.notificationToken) {
+    sendNotification({
+      token: toUser.notificationToken,
+      title: `New message from ${fromUser.firstName || fromUser.entityName}`,
+      body: "image",
+      image,
+      caseType: "chat",
+      info: roomId,
+      icon: fromUser.profilePicture
+    });
+  }
+};
