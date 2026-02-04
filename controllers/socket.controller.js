@@ -90,6 +90,36 @@ class SocketController {
     }
   };
 
+  stopTyping = async (socket, userData, { chatId }) => {
+    try {
+      if (!chatId) {
+        socket.emit("error", "Chat ID is required");
+        return;
+      }
+
+      const chat = await Chat.findById(chatId);      
+      if (!chat || !chat.participants.includes(userData._id.toString())) {
+        socket.emit("error", "Chat not found or unauthorized");
+        return;
+      }
+
+      // Notify other participants that user stopped typing
+      chat.participants.forEach((participant) => {
+        if (participant.toString() !== userData._id.toString()) {
+          socket.to(participant.toString()).emit("stop-typing", {
+            chatId,
+            userId: userData._id,
+            userName: userData.firstName
+          });
+        }
+      });
+        
+    } catch (error) {
+      console.error("Error in stopTyping:", error);
+      socket.emit("error", "Failed to send stop typing indicator");
+    }
+  };
+
 }
 
 module.exports = new SocketController();
