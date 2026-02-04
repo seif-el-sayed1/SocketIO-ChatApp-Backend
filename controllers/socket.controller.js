@@ -247,6 +247,70 @@ class SocketController {
     }
   };
 
+  messagesDeliveredOnConnect = async (io, socket, userData, chatRoomUsers) => {
+    try {
+        let chats = await Chat.find({ participants: userData._id });
+        let chatIds = chats.map((chat) => chat._id.toString());
+
+        // Find undelivered and unread messages sent by others
+        const messages = await Message.find({
+            chat: { $in: chatIds },
+            sender: { $ne: userData._id }, 
+            isDelivered: false,
+            isRead: false
+        });
+
+        for (let message of messages) {
+            if (!message || !message.chat) return;
+
+            const chatId = message.chat.toString();
+            const chat = await Chat.findById(chatId);
+            
+            if (!chat || !chat.participants.includes(userData._id.toString()))
+                return socket.emit("error", "Chat not found or unauthorized");
+
+            // Prepare update: mark as delivered, and read if user is in chat room
+            const updateBody = { isDelivered: true };
+            if (chatRoomUsers[chatId] && chatRoomUsers[chatId].has(userData._id.toString()))
+                updateBody.isRead = true;
+
+            // Update all messages up to current message timestamp
+            await Message.updateMany(
+                {
+                    chat: chatId,
+                    sender: { $ne: userData._id },
+                    createdAt: { $lte: message.createdAt }
+                },
+                updateBody
+            );
+
+            // Find the other participant to notify
+            const otherUserId = chat.participants.find(
+                (participant) => participant.toString() !== userData._id.toString()
+            );
+
+            if (otherUserId) {
+                // Notify other user that message has been delivered
+                io.to(otherUserId.toString()).emit("message-delivered", {
+                    chatId,
+                    messageId: message._id,
+                    messageTime: message.createdAt
+                });
+
+                // If user is active in chat, also mark as seen
+                if (chatRoomUsers[chatId] && chatRoomUsers[chatId].has(userData._id.toString()))
+                    io.to(otherUserId.toString()).emit("messages-seen", {
+                        chatId,
+                        seenTime: new Date()
+                    });
+            }
+        }
+
+    } catch (error) {
+        socket.emit("error", { message: error.message });
+    }
+  };
+
 }
 
 module.exports = new SocketController();
