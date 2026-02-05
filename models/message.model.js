@@ -39,6 +39,9 @@ const messageSchema = new mongoose.Schema(
     isRead: {
       type: Boolean,
       default: false
+    },
+    isMyMsg: {
+      type: Boolean
     }
   },
   {timestamps: true,}
