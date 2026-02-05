@@ -376,6 +376,74 @@ class ChatController {
     });
   });
 
+  // @desc    Get chat messages
+  // @route   POST /chats/:id/messages
+  // @access  Private
+  getChatMessages = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { _id: userId } = req.user;
+    const lang = req.headers.lang || "en";
+    
+    const chat = await Chat.findById(id);
+    if (!chat)
+      return res.status(404).json({
+        success: false,
+        message: translate("Chat Not Found!", lang)
+      });
+    
+    if (!chat.participants.includes(userId))
+      return res.status(403).json({
+        success: false,
+        message: translate("You are not a participant in this chat", lang)
+      });
+    
+    // Build query, ignore messages cleared by user
+    const query = { chat: id };
+    if (chat.clearedBy && chat.clearedBy?.toString() === req.user._id.toString())
+      query.createdAt = { $gt: chat.clearedAt };
+    
+    // Apply filters, search, pagination via ApiFeatures
+    const apiFeatures = new ApiFeatures(
+      Message.find(query)
+        .select("_id sender content type isDelivered isRead createdAt updatedAt")
+        .sort({ createdAt: -1 }),
+      req.query,
+      "Message"
+    )
+      .filter()
+      .search();
+    
+    await apiFeatures.calculatePagination();
+    apiFeatures.paginate().cleanResponse();
+    
+    // Execute the query
+    const messages = await apiFeatures.query;
+    
+    // Transform messages for frontend
+    const transformedMessages = messages.map((message) => ({
+      ...message._doc,
+      sender: undefined, // hide sender object
+      isDelivered: message.sender.toString() === userId.toString() ? message.isDelivered : true,
+      isRead: message.sender.toString() === userId.toString() ? message.isRead : true,
+      isMyMsg: message.sender.toString() === userId.toString()
+    }));
+    
+    // Mark all messages from others as delivered & read
+    await Message.updateMany(
+      { sender: { $ne: req.user._id }, chat: id },
+      { isDelivered: true, isRead: true }
+    );
+    
+    // Send response with pagination info
+    res.status(200).json({
+      success: true,
+      totalResults: transformedMessages.length,
+      pagination: apiFeatures.paginationResult,
+      data: transformedMessages
+    });
+  });
+
+  
 }
 
 module.exports = new ChatController();
