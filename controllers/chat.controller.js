@@ -321,6 +321,61 @@ class ChatController {
     });
   });
 
+  // @desc    Get one chat
+  // @route   GET /chats/:id
+  // @access  Private
+  getOneChat = asyncHandler(async (req, res) => {
+    const noOfMessages = parseInt(req.query.noOfMessages) || 10;
+    // Find the chat by ID and populate participants
+    const chat = await Chat.findById(req.params.id).populate(
+      "participants",
+      "_id firstName lastName profilePicture blockedUsers"
+    );
+    // Find the participant who is not the logged-in user
+    const toParticipant = chat.participants.find(
+      (participant) => participant._id.toString() !== req.user._id.toString()
+    );
+    // Determine if the logged-in user has blocked the other participant
+    const blockedByMe = req.user.blockedUsers.includes(toParticipant._id);
+    // Determine if the other participant has blocked the logged-in user
+    const blockedByOtherUser = toParticipant.blockedUsers.includes(req.user._id);
+    // Prepare the response data
+    let data = {
+      _id: chat._id,
+      to: {
+        _id: toParticipant._id,
+        profilePicture: toParticipant.profilePicture,
+        fullName: `${toParticipant.firstName} ${toParticipant.lastName}`
+      },
+      blocked: blockedByMe || blockedByOtherUser,
+      blockedByMe,
+      blockedByOtherUser,
+      messages: []
+    };
+    // Retrieve the latest messages for this chat
+    const query = {
+      chat: req.params.id
+    };
+    if (chat.clearedBy && chat.clearedBy?.toString() === req.user._id.toString())
+      query.createdAt = { $gt: chat.clearedAt };
+    const messages = await Message.find(query).sort({ createdAt: -1 }).limit(noOfMessages);
+    // Format the messages for the response
+    data.messages = messages.map((msg) => ({
+      _id: msg._id,
+      content: msg.content,
+      type: msg.type,
+      isMyMsg: msg.sender.toString() === req.user._id.toString(),
+      isDelivered: msg.isDelivered,
+      isRead: msg.isRead,
+      createdAt: msg.createdAt
+    }));
+    // Send the response
+    res.status(200).json({
+      success: true,
+      data
+    });
+  });
+
 }
 
 module.exports = new ChatController();
