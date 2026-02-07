@@ -22,5 +22,16 @@ router.route("/:id").get(protect, allowedTo(USER), ChatController.getOneChat);
 
 router.route("/:id/messages").get(protect, allowedTo(USER), ChatController.getChatMessages);
 
+router
+  .route("/")
+  .post(
+    protect,
+    allowedTo(USER),
+    upload.uploadMultipleImagesForChat,
+    FirebaseImageController.uploadMultipleImagesForTheChat("Chats"),
+    ChatController.sendMediaMessage
+  );
+
+router.route("/clear/:id").patch(protect, allowedTo(USER), ChatController.clearChat);
 
 module.exports = router;
