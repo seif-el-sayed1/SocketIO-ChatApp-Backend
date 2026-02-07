@@ -81,6 +81,23 @@ class UserValidator {
     joiErrorHandler(schema, req);
     next();
   });
+
+  validateUserBlock = asyncHandler(async (req, res, next) => {
+      let { id } = req.params;
+      if (id.toString() === req.userId.toString())
+        return next(
+          new ApiError(
+            translate("You Can't Block Yourself", req.headers.lang),
+            400
+          )
+        );
+      let user = await User.findById(id, null, { skipPopulation: true });
+      if (!user)
+        return next(
+          new ApiError(translate("User Not Found!", req.headers.lang), 404)
+        );
+      next();
+    });
   
 }
 
