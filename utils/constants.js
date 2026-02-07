@@ -1,6 +1,7 @@
 exports.USER = "user";
 
 exports.ROLES = [exports.USER];
+exports.LANG = ["en", "ar"]
 
 exports.LOGIN_TYPE_LIST = ["apple", "google", "email", "social"];
 exports.LOGIN_TYPE_PLATFORM_LIST = ["apple", "google", "social"];
