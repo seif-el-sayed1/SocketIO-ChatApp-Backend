@@ -1,7 +1,7 @@
 const express = require("express");
 
 // Auth middlewares
-const { protect, allowedTo } = require("../middlewares/auth.middleware");
+const { protect, allowedTo } = require("../middleware/auth.middleware");
 
 // Constants
 const { USER } = require("../utils/constants");
@@ -21,7 +21,7 @@ router
       protect,
       allowedTo(USER),
       GlobalValidator.updateUserLangValidator,
-      UserController.updateUserLang
+      ActionsController.updateUserLang
   );
 
 router

@@ -1,7 +1,7 @@
 const express = require("express");
 
 // Auth middlewares
-const { protect, allowedTo } = require("../middlewares/auth.middleware");
+const { protect, allowedTo } = require("../middleware/auth.middleware");
 
 // Constants
 const { USER } = require("../utils/constants");
@@ -10,7 +10,7 @@ const { USER } = require("../utils/constants");
 const ChatController = require("../controllers/chat.controller");
 const FirebaseImageController = require("../controllers/firebase.controller");
 
-const upload = require("../middlewares/uploadImage.middleware");
+const upload = require("../middleware/upload.middleware");
 
 // Router
 const router = express.Router();  
