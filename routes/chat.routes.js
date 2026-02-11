@@ -17,6 +17,7 @@ const router = express.Router();
 
 // Routes
 router.route("/").get(protect, allowedTo(USER), ChatController.getMyChats);
+router.route("/users").get(protect, allowedTo(USER), ChatController.getAllUsers);
 
 router.route("/:id").get(protect, allowedTo(USER), ChatController.getOneChat);
 
