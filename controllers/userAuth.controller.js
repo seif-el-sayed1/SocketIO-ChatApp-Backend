@@ -19,6 +19,7 @@ class UserController {
       role: user.role,
       profilePicture: user.profilePicture,
       email: user.email,
+      blockedUsers: user.blockedUsers,
       dateOfBirth: user.dateOfBirth,
       age: user.age,
       gender: user.gender,
