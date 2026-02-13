@@ -75,8 +75,8 @@ class SocketController {
 
         // Notify other participants that current user is typing
         chat.participants.forEach((participant) => {
-            if (participant !== userData._id.toString()) {
-                socket.to(participant).emit("typing", {
+            if (participant.toString() !== userData._id.toString()) {
+                socket.to(participant.toString()).emit("typing", {
                     chatId,
                     userId: userData._id,
                     userName: userData.firstName
@@ -261,7 +261,7 @@ class SocketController {
         });
 
         for (let message of messages) {
-            if (!message || !message.chat) return;
+            if (!message || !message.chat) continue;
 
             const chatId = message.chat.toString();
             const chat = await Chat.findById(chatId);
