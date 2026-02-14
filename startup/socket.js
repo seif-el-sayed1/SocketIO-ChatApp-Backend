@@ -37,7 +37,6 @@ const sendMediaNotification = ({ fromUser, toUser, roomId, image }) => {
       image,
       caseType: "chat",
       info: roomId,
-      icon: fromUser.profilePicture
     });
   }
 };
