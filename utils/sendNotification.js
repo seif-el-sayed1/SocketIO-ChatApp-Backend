@@ -1,5 +1,12 @@
 const { getMessaging } = require("firebase-admin/messaging");
 const expressAsyncHandler = require("express-async-handler");
+const admin = require("firebase-admin");
+const serviceAccount = require("../firebaseServiceAccountKey.json");
+
+admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET
+});
 
 const sendNotification = ({
   global,
@@ -46,31 +53,37 @@ const sendNotification = ({
       }
     }
   };
+
   if (global) message.topic = "global";
   else if (token) message.token = token;
   else if (topic) message.topic = topic;
   else throw new Error("Token or topic is required to send a notification");
-  // Send a message to the device corresponding to the provided registration token
-  getMessaging()
-    .send(message)
-    .then((response) => {
-      console.log("Notification is sent successfully: ", response);
-    })
-    .catch((error) => {
-      console.log("Error sending notification:", error);
-    });
+
+  // Send notification
+    getMessaging()
+      .send(message)
+      .then((response) => {
+        console.log("Notification is sent successfully: ", response);
+      })
+      .catch((error) => {
+        console.log("Error sending notification:", error);
+      });
+
+  // Data-only notification
   if (isDataOnly) {
     delete message.notification;
     delete message.apns.payload.aps.alert;
     delete message.apns.payload.aps.badge;
     delete message.apns.payload.aps.sound;
     delete message.apns.payload.aps["mutable-content"];
+
     message.apns.payload.aps["content-available"] = 1;
     message.apns.headers["apns-priority"] = "5";
+
     getMessaging()
       .send(message)
       .then((response) => {
-        console.log("Data only notification is sent successfully: ", response);
+        console.log("Data only notification is sent successfully: ".green.bold, response);
       })
       .catch((error) => {
         console.log("Error sending data only notification:", error);
@@ -115,6 +128,7 @@ const saveUsersNotification = expressAsyncHandler(
           user: userId,
           sentBy
         });
+
         await notification.save();
         console.log("Notification is saved successfully");
         return notification;
