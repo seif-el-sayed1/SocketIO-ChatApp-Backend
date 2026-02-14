@@ -234,11 +234,9 @@ class SocketController {
             sendNotification({
                 token: otherUser.notificationToken,
                 title: `${translate("New message from", otherUser.lang)} ${userData.firstName || userData.entityName}`,
-                icon: userData?.icon,
                 body: content,
                 caseType: "chat",
                 info: chatId.toString(),
-                isDataOnly: true
             });
         }
 
