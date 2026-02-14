@@ -1,13 +1,8 @@
-// Import the functions you need from the SDKs you need
 const { initializeApp } = require("firebase/app");
 const { getStorage } = require("firebase/storage");
 const admin = require("firebase-admin");
+const serviceAccount = require("../firebaseServiceAccountKey.json");
 
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
-// const serviceAccount = require("../firebaseServiceAccountKey");
-
-// Your web app's Firebase configuration
 const firebaseConfig = {
   apiKey: process.env.FIREBASE_API_KEY,
   authDomain: process.env.FIREBASE_AUTH_DOMAIN,
@@ -18,12 +13,11 @@ const firebaseConfig = {
   measurementId: process.env.FIREBASE_MEASUREMENT_ID
 };
 
-// // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-// admin.initializeApp({
-//   credential: admin.credential.cert(serviceAccount)
-//   // databaseURL: process.env.FIREBASE_DB_URL,
-// });
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  storageBucket: process.env.FIREBASE_STORAGE_BUCKET
+});
 
 const decodeToken = async (idToken) => {
   const userData = await admin.auth().verifyIdToken(idToken);
@@ -31,4 +25,4 @@ const decodeToken = async (idToken) => {
 };
 
 const storage = getStorage(app);
-module.exports = { storage };
+module.exports = { storage, decodeToken };
