@@ -472,138 +472,166 @@ class ChatController {
     session.startTransaction();
 
     try {
-        const { _id: sender } = req.user;
-        const { receiverId, chatId, media } = req.body;
-        const lang = req.headers.lang || "en";
+      const { _id: sender } = req.user;
+      const { receiverId, chatId, media } = req.body;
+      const lang = req.headers.lang || "en";
 
-        let chat;
-        let firstMsg = false;
+      let chat;
+      let firstMsg = false;
 
-        // Check if a chat already exists or needs to be created
-        if (chatId && !receiverId) {
-            chat = await Chat.findById(chatId)
-                .populate(
-                    "participants",
-                    "_id profilePicture firstName lastName lang notificationToken"
-                )
-                .session(session);
+      // Check if a chat already exists or needs to be created
+      if (chatId && !receiverId) {
+          chat = await Chat.findById(chatId)
+              .populate(
+                  "participants",
+                  "_id profilePicture firstName lastName lang notificationToken"
+              )
+              .session(session);
 
-            if (!chat) throw new ApiError(translate("Chat not found", lang), 404);
+          if (!chat) throw new ApiError(translate("Chat not found", lang), 404);
 
-        } else if (receiverId && !chatId) {
-            chat = await Chat.findOne({ participants: { $all: [sender, receiverId] } })
-                .populate(
-                    "participants",
-                    "_id profilePicture firstName lastName lang notificationToken"
-                )
-                .session(session);
+      } else if (receiverId && !chatId) {
+          chat = await Chat.findOne({ participants: { $all: [sender, receiverId] } })
+              .populate(
+                  "participants",
+                  "_id profilePicture firstName lastName lang notificationToken"
+              )
+              .session(session);
 
-            if (!chat) {
-                // Create a new chat if none exists
-                chat = await Chat.create(
-                    [{ participants: [sender, receiverId] }],
-                    { session }
-                );
+          if (!chat) {
+              // Create a new chat if none exists
+              chat = await Chat.create(
+                  [{ participants: [sender, receiverId] }],
+                  { session }
+              );
 
-                firstMsg = true;
+              firstMsg = true;
 
-                // Populate participants after creating the chat
-                chat = await Chat.findById(chat[0]._id)
-                    .populate(
-                        "participants",
-                        "_id profilePicture firstName lastName lang notificationToken"
-                    )
-                    .session(session);
-            }
+              // Populate participants after creating the chat
+              chat = await Chat.findById(chat[0]._id)
+                  .populate(
+                      "participants",
+                      "_id profilePicture firstName lastName lang notificationToken"
+                  )
+                  .session(session);
+          }
 
-        } else {
-            throw new ApiError("Please provide either chat id or receiver id", 400);
-        }
+      } else {
+          throw new ApiError("Please provide either chat id or receiver id", 400);
+      }
 
-        // Check cleared messages if needed (BEFORE creating new messages)
-        if (!firstMsg && chat.clearedBy && chat.clearedAt) {
-            const messagesAfterClear = await Message.find({ 
-                chat: chat._id, 
-                createdAt: { $gt: chat.clearedAt } 
-            }).session(session);
-            
-            firstMsg = messagesAfterClear.length === 0;
-        }
+      // Check cleared messages if needed (BEFORE creating new messages)
+      if (!firstMsg && chat.clearedBy && chat.clearedAt) {
+          const messagesAfterClear = await Message.find({ 
+              chat: chat._id, 
+              createdAt: { $gt: chat.clearedAt } 
+          }).session(session);
+          
+          firstMsg = messagesAfterClear.length === 0;
+      }
 
-        // Create media messages
-        const promises = media.map((one) =>
-            Message.create(
-                [
-                    {
-                        chat: chat._id,
-                        sender,
-                        type: "image",
-                        content: one,
-                    },
-                ],
-                { session }
-            )
-        );
+      // Create media messages
+      const promises = media.map((one) =>
+          Message.create(
+              [
+                  {
+                      chat: chat._id,
+                      sender,
+                      type: "image",
+                      content: one,
+                  },
+              ],
+              { session }
+          )
+      );
 
-        let messages = await Promise.all(promises);
-        messages = messages.map((msg) => msg[0]);
+      let messages = await Promise.all(promises);
+      messages = messages.map((msg) => msg[0]);
 
-        // Get the other participant (receiver)
-        const toParticipant = chat.participants.find(
-            p => p._id.toString() !== sender.toString()
-        );
+      // Get the other participant (receiver)
+      const toParticipant = chat.participants.find(
+          p => p._id.toString() !== sender.toString()
+      );
 
-        // Emit messages through socket.io
-        const io = req.app.get("socketio");
+      const io = req.app.get("socketio");
+      const onlineUsers = req.app.get("onlineUsers");
+      const receiverIsOnline = !!(onlineUsers && toParticipant && (
+          typeof onlineUsers.has === "function"
+              ? onlineUsers.has(toParticipant._id.toString())
+              : Array.isArray(onlineUsers)
+                  ? onlineUsers.includes(toParticipant._id.toString())
+                  : false
+      ));
 
-        // Loop through each message
-        messages.forEach((newMessage, index) => {
-            // Only the FIRST message should trigger "new-chat"
-            const isFirstMessage = firstMsg && index === 0;
+      if (receiverIsOnline) {
+          await Message.updateMany(
+              { _id: { $in: messages.map(m => m._id) } },
+              { isDelivered: true },
+              { session }
+          );
+          messages = messages.map(m => ({ ...m.toObject(), isDelivered: true }));
+      }
 
-            for (let participant of chat.participants) {
-                // Get the other participant for this specific participant
-                const otherParticipant = chat.participants.find(
-                    p => p._id.toString() !== participant._id.toString()
-                );
+      // Loop through each message
+      messages.forEach((newMessage, index) => {
+          // Only the FIRST message should trigger "new-chat"
+          const isFirstMessage = firstMsg && index === 0;
 
-                if (isFirstMessage) {
-                    // Emit new-chat event ONLY for first message
-                    io.to(participant._id.toString()).emit("new-chat", {
-                        _id: chat._id,
-                        to: {
-                            _id: otherParticipant._id,
-                            profilePicture: otherParticipant?.profilePicture || "",
-                            fullName: `${otherParticipant.firstName} ${otherParticipant.lastName}`
-                        },
-                        messages: [{
-                            _id: newMessage._id,
-                            sender: {
-                                _id: req.user._id,
-                                fullName: participant._id.toString() === req.user._id.toString() 
-                                    ? "You" 
-                                    : req.user.firstName
-                            },
-                            content: newMessage.content,
-                            type: newMessage.type,
-                            isDelivered: newMessage.isDelivered,
-                            isRead: newMessage.isRead,
-                            isMyMsg: participant._id.toString() === req.user._id.toString(),
-                            createdAt: newMessage.createdAt
-                        }],
-                        unreadMessagesCount: participant._id.toString() === req.user._id.toString() ? 0 : 1,
-                        blocked: false
-                    });
-                } else {
-                    // Emit regular message event
-                    io.to(participant._id.toString()).emit("message", {
-                        ...newMessage.toObject(),
-                        sender: undefined,
-                        isMyMsg: participant._id.toString() === req.user._id.toString()
-                    });
-                }
-            }
-        });
+          for (let participant of chat.participants) {
+              const isMe = participant._id.toString() === req.user._id.toString();
+
+              if (isFirstMessage) {
+                  // Emit new-chat event ONLY for first message
+                  io.to(participant._id.toString()).emit("new-chat", {
+                      _id: chat._id,
+                      to: {
+                          _id: toParticipant._id,
+                          profilePicture: toParticipant?.profilePicture || "",
+                          fullName: `${toParticipant.firstName} ${toParticipant.lastName}`
+                      },
+                      messages: [{
+                          _id: newMessage._id,
+                          sender: {
+                              _id: req.user._id,
+                              fullName: isMe ? "You" : req.user.firstName
+                          },
+                          receiver: { _id: toParticipant._id },
+                          content: newMessage.content,
+                          type: newMessage.type,
+                          isDelivered: newMessage.isDelivered,
+                          isRead: newMessage.isRead,
+                          isMyMsg: isMe,
+                          createdAt: newMessage.createdAt
+                      }],
+                      unreadMessagesCount: isMe ? 0 : 1,
+                      blocked: false
+                  });
+
+                  if (isMe && receiverIsOnline) {
+                      io.to(req.user._id.toString()).emit("message-delivered", {
+                          chatId: chat._id,
+                          messageId: newMessage._id,
+                          messageTime: newMessage.createdAt
+                      });
+                  }
+              } else {
+                  io.to(participant._id.toString()).emit("message", {
+                      ...newMessage,
+                      sender: undefined,
+                      receiver: { _id: toParticipant._id },
+                      isMyMsg: isMe
+                  });
+
+                  if (isMe && receiverIsOnline) {
+                      io.to(req.user._id.toString()).emit("message-delivered", {
+                          chatId: chat._id,
+                          messageId: newMessage._id,
+                          messageTime: newMessage.createdAt
+                      });
+                  }
+              }
+          }
+      });
 
         // Send ONE notification for all media (not per message)
         if (toParticipant?.notificationToken) {
@@ -632,7 +660,7 @@ class ChatController {
                           fullName: `${toParticipant.firstName} ${toParticipant.lastName}`
                       },
                       messages: messages.map((msg) => ({
-                          ...msg.toObject(),
+                          ...(msg.toObject ? msg.toObject() : msg),
                           sender: undefined,
                           isMyMsg: true,
                       })),
@@ -643,7 +671,7 @@ class ChatController {
             messages: firstMsg
                 ? undefined
                 : messages.map((msg) => ({
-                      ...msg.toObject(),
+                      ...(msg.toObject ? msg.toObject() : msg),
                       sender: undefined,
                       isMyMsg: true,
                   })),
