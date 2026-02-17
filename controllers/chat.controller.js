@@ -479,79 +479,44 @@ class ChatController {
       let chat;
       let firstMsg = false;
 
-      // Check if a chat already exists or needs to be created
       if (chatId && !receiverId) {
           chat = await Chat.findById(chatId)
-              .populate(
-                  "participants",
-                  "_id profilePicture firstName lastName lang notificationToken"
-              )
+              .populate("participants", "_id profilePicture firstName lastName lang notificationToken")
               .session(session);
-
           if (!chat) throw new ApiError(translate("Chat not found", lang), 404);
 
       } else if (receiverId && !chatId) {
           chat = await Chat.findOne({ participants: { $all: [sender, receiverId] } })
-              .populate(
-                  "participants",
-                  "_id profilePicture firstName lastName lang notificationToken"
-              )
+              .populate("participants", "_id profilePicture firstName lastName lang notificationToken")
               .session(session);
 
           if (!chat) {
-              // Create a new chat if none exists
-              chat = await Chat.create(
-                  [{ participants: [sender, receiverId] }],
-                  { session }
-              );
-
+              chat = await Chat.create([{ participants: [sender, receiverId] }], { session });
               firstMsg = true;
-
-              // Populate participants after creating the chat
               chat = await Chat.findById(chat[0]._id)
-                  .populate(
-                      "participants",
-                      "_id profilePicture firstName lastName lang notificationToken"
-                  )
+                  .populate("participants", "_id profilePicture firstName lastName lang notificationToken")
                   .session(session);
           }
-
       } else {
           throw new ApiError("Please provide either chat id or receiver id", 400);
       }
 
-      // Check cleared messages if needed (BEFORE creating new messages)
       if (!firstMsg && chat.clearedBy && chat.clearedAt) {
           const messagesAfterClear = await Message.find({ 
               chat: chat._id, 
               createdAt: { $gt: chat.clearedAt } 
           }).session(session);
-          
           firstMsg = messagesAfterClear.length === 0;
       }
 
-      // Create media messages
       const promises = media.map((one) =>
-          Message.create(
-              [
-                  {
-                      chat: chat._id,
-                      sender,
-                      type: "image",
-                      content: one,
-                  },
-              ],
-              { session }
-          )
+          Message.create([{ chat: chat._id, sender, type: "image", content: one }], { session })
       );
 
       let messages = await Promise.all(promises);
       messages = messages.map((msg) => msg[0]);
 
-      // Get the other participant (receiver)
-      const toParticipant = chat.participants.find(
-          p => p._id.toString() !== sender.toString()
-      );
+      const toParticipant = chat.participants.find(p => p._id.toString() !== sender.toString());
 
       const io = req.app.get("socketio");
       const onlineUsers = req.app.get("onlineUsers");
@@ -569,19 +534,20 @@ class ChatController {
               { isDelivered: true },
               { session }
           );
-          messages = messages.map(m => ({ ...m.toObject(), isDelivered: true }));
+          messages = messages.map(m => {
+              const plain = m.toObject ? m.toObject() : { ...m };
+              plain.isDelivered = true;
+              return plain;
+          });
       }
 
-      // Loop through each message
       messages.forEach((newMessage, index) => {
-          // Only the FIRST message should trigger "new-chat"
           const isFirstMessage = firstMsg && index === 0;
 
           for (let participant of chat.participants) {
               const isMe = participant._id.toString() === req.user._id.toString();
 
               if (isFirstMessage) {
-                  // Emit new-chat event ONLY for first message
                   io.to(participant._id.toString()).emit("new-chat", {
                       _id: chat._id,
                       to: {
@@ -591,10 +557,7 @@ class ChatController {
                       },
                       messages: [{
                           _id: newMessage._id,
-                          sender: {
-                              _id: req.user._id,
-                              fullName: isMe ? "You" : req.user.firstName
-                          },
+                          sender: { _id: req.user._id, fullName: isMe ? "You" : req.user.firstName },
                           receiver: { _id: toParticipant._id },
                           content: newMessage.content,
                           type: newMessage.type,
@@ -615,8 +578,9 @@ class ChatController {
                       });
                   }
               } else {
+                  const msgPlain = newMessage.toObject ? newMessage.toObject() : { ...newMessage };
                   io.to(participant._id.toString()).emit("message", {
-                      ...newMessage,
+                      ...msgPlain,
                       sender: undefined,
                       receiver: { _id: toParticipant._id },
                       isMyMsg: isMe
@@ -633,58 +597,47 @@ class ChatController {
           }
       });
 
-        // Send ONE notification for all media (not per message)
-        if (toParticipant?.notificationToken) {
-            sendMediaNotification({
-                fromUser: req.user,
-                toUser: toParticipant,
-                roomId: chat._id.toString(),
-                image: messages[0].content,
-                count: messages.length
-            });
-        }
+      if (toParticipant?.notificationToken) {
+          sendMediaNotification({
+              fromUser: req.user,
+              toUser: toParticipant,
+              roomId: chat._id.toString(),
+              image: messages[0].content,
+              count: messages.length
+          });
+      }
 
-        // Commit the transaction
-        await session.commitTransaction();
-        session.endSession();
+      await session.commitTransaction();
+      session.endSession();
 
-        // Send response
-        res.status(201).json({
-            success: true,
-            chat: firstMsg
-                ? {
-                      _id: chat._id,
-                      to: {
-                          _id: toParticipant._id,
-                          profilePicture: toParticipant.profilePicture,
-                          fullName: `${toParticipant.firstName} ${toParticipant.lastName}`
-                      },
-                      messages: messages.map((msg) => ({
-                          ...(msg.toObject ? msg.toObject() : msg),
-                          sender: undefined,
-                          isMyMsg: true,
-                      })),
-                      unreadMessagesCount: 0,
-                      blocked: false,
-                  }
-                : undefined,
-            messages: firstMsg
-                ? undefined
-                : messages.map((msg) => ({
-                      ...(msg.toObject ? msg.toObject() : msg),
-                      sender: undefined,
-                      isMyMsg: true,
-                  })),
-        });
+      // ✅ الـ fix: بنحط isDelivered صح في الـ response
+      const formatMsg = (msg) => ({
+          ...(msg.toObject ? msg.toObject() : msg),
+          sender: undefined,
+          isMyMsg: true,
+          isDelivered: receiverIsOnline ? true : (msg.isDelivered ?? false), // ✅
+      });
+
+      res.status(201).json({
+          success: true,
+          chat: firstMsg ? {
+              _id: chat._id,
+              to: {
+                  _id: toParticipant._id,
+                  profilePicture: toParticipant.profilePicture,
+                  fullName: `${toParticipant.firstName} ${toParticipant.lastName}`
+              },
+              messages: messages.map(formatMsg),
+              unreadMessagesCount: 0,
+              blocked: false,
+          } : undefined,
+          messages: firstMsg ? undefined : messages.map(formatMsg),
+      });
 
     } catch (error) {
-        // Abort the transaction in case of error
         if (session.inTransaction()) await session.abortTransaction();
         session.endSession();
-
-        // Rollback uploaded images
         FirebaseImageController.rollbackChatImages(req);
-
         next(error);
     }
   });
