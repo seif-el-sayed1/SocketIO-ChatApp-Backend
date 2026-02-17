@@ -181,6 +181,23 @@ class SocketController {
             "_id firstName lastName profilePicture notificationToken lang"
         );
 
+        const otherParticipant = chat.participants.find(
+            (p) => p._id.toString() !== userData._id.toString()
+        );
+        const receiverId = otherParticipant?._id.toString();
+        const receiverIsOnline = !!(onlineUsers && receiverId && (
+            typeof onlineUsers.has === "function"
+                ? onlineUsers.has(receiverId)
+                : Array.isArray(onlineUsers)
+                    ? onlineUsers.includes(receiverId)
+                    : false
+        ));
+
+        if (receiverIsOnline) {
+            await Message.findByIdAndUpdate(newMessage._id, { isDelivered: true });
+            newMessage.isDelivered = true;
+        }
+
         // Loop through participants to emit message events
         for (let participant of chat.participants) {
             // Determine if this message is the first message after chat cleared
@@ -191,9 +208,13 @@ class SocketController {
                 } else firstMsg = false;
             }
 
+            const isMe = participant._id.toString() === userData._id.toString();
+
             // Emit new-chat event if first message
             if (firstMsg) {
-                const toParticipant = chat.participants.find(p => p._id.toString() !== participant._id.toString());
+                const toParticipant = chat.participants.find(
+                    (p) => p._id.toString() !== participant._id.toString()
+                );
                 io.to(participant._id.toString()).emit("new-chat", {
                     _id: chatId,
                     to: {
@@ -205,24 +226,33 @@ class SocketController {
                         _id: newMessage._id,
                         sender: {
                             _id: userData._id,
-                            fullName: participant._id.toString() === userData._id.toString() ? "You" : userData.firstName
+                            fullName: isMe ? "You" : userData.firstName
                         },
+                        receiver: { _id: otherParticipant?._id },
                         content: newMessage.content,
                         type: newMessage.type,
                         isDelivered: newMessage.isDelivered,
                         isRead: newMessage.isRead,
-                        isMyMsg: participant._id.toString() === userData._id.toString(),
+                        isMyMsg: isMe,
                         createdAt: newMessage.createdAt
                     }],
-                    unreadMessagesCount: participant._id.toString() === userData._id.toString() ? 0 : 1,
+                    unreadMessagesCount: isMe ? 0 : 1,
                     blocked: false
                 });
             } else {
-                // Emit regular message event
                 io.to(participant._id.toString()).emit("message", {
                     ...newMessage.toObject(),
                     sender: undefined,
-                    isMyMsg: participant._id.toString() === userData._id.toString()
+                    receiver: { _id: otherParticipant?._id },
+                    isMyMsg: isMe
+                });
+            }
+
+            if (isMe && receiverIsOnline) {
+                io.to(userData._id.toString()).emit("message-delivered", {
+                    chatId,
+                    messageId: newMessage._id,
+                    messageTime: newMessage.createdAt
                 });
             }
         }
