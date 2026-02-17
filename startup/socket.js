@@ -45,8 +45,9 @@ const sendMediaNotification = ({ fromUser, toUser, roomId, image }) => {
 module.exports = (server, app) => {
   io = socketio(server, { cors: { origin: "*", methods: ["GET","POST"], credentials: true }});
   app.set("socketio", io);
+  // Store online users in app locals for access in controllers
+  app.set("onlineUsers", onlineUsers); 
 
-  // COMMIT: Handle socket connection: join personal room, track online users, and emit online status
   io.on("connection", async (socket) => {
     try {
       const token = socket.handshake.headers.authorization;
@@ -61,7 +62,6 @@ module.exports = (server, app) => {
       // Deliver any pending messages
       SocketController.messagesDeliveredOnConnect(io, socket, userData, chatRoomUsers);
 
-      // COMMIT: Add socket event handlers for typing, messaging, and chat room management
       // Handle chat events
       socket.on("typing", (data) => SocketController.startTyping(socket, userData, data));
       socket.on("stop-typing", (data) => SocketController.stopTyping(socket, userData, data));
@@ -70,7 +70,6 @@ module.exports = (server, app) => {
       socket.on("leave-chat", (data) => SocketController.leaveChat(socket, userData, chatRoomUsers, data));
       socket.on("new-message", (data) => SocketController.sendChatMessage(io, socket, userData, chatRoomUsers, data, Array.from(onlineUsers)));
 
-      // COMMIT: Handle user disconnect: remove from online list and leave all chat rooms
       // Remove user from online tracking on disconnect
       socket.on("disconnect", () => {
         onlineUsers.delete(userData._id.toString());
