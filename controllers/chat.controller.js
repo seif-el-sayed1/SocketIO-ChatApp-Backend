@@ -520,15 +520,34 @@ class ChatController {
 
       const io = req.app.get("socketio");
       const onlineUsers = req.app.get("onlineUsers");
+      const { chatRoomUsers } = require("../startup/socket"); 
+
+      const resolvedChatId = chat._id.toString();
+      const receiverId_ = toParticipant._id.toString();
+
       const receiverIsOnline = !!(onlineUsers && toParticipant && (
           typeof onlineUsers.has === "function"
-              ? onlineUsers.has(toParticipant._id.toString())
+              ? onlineUsers.has(receiverId_)
               : Array.isArray(onlineUsers)
-                  ? onlineUsers.includes(toParticipant._id.toString())
+                  ? onlineUsers.includes(receiverId_)
                   : false
       ));
 
-      if (receiverIsOnline) {
+      const receiverInRoom = !!(chatRoomUsers[resolvedChatId] && chatRoomUsers[resolvedChatId].has(receiverId_));
+
+      if (receiverInRoom) {
+          await Message.updateMany(
+              { _id: { $in: messages.map(m => m._id) } },
+              { isDelivered: true, isRead: true },
+              { session }
+          );
+          messages = messages.map(m => {
+              const plain = m.toObject ? m.toObject() : { ...m };
+              plain.isDelivered = true;
+              plain.isRead = true;
+              return plain;
+          });
+      } else if (receiverIsOnline) {
           await Message.updateMany(
               { _id: { $in: messages.map(m => m._id) } },
               { isDelivered: true },
@@ -569,14 +588,6 @@ class ChatController {
                       unreadMessagesCount: isMe ? 0 : 1,
                       blocked: false
                   });
-
-                  if (isMe && receiverIsOnline) {
-                      io.to(req.user._id.toString()).emit("message-delivered", {
-                          chatId: chat._id,
-                          messageId: newMessage._id,
-                          messageTime: newMessage.createdAt
-                      });
-                  }
               } else {
                   const msgPlain = newMessage.toObject ? newMessage.toObject() : { ...newMessage };
                   io.to(participant._id.toString()).emit("message", {
@@ -585,14 +596,19 @@ class ChatController {
                       receiver: { _id: toParticipant._id },
                       isMyMsg: isMe
                   });
+              }
 
-                  if (isMe && receiverIsOnline) {
-                      io.to(req.user._id.toString()).emit("message-delivered", {
-                          chatId: chat._id,
-                          messageId: newMessage._id,
-                          messageTime: newMessage.createdAt
-                      });
-                  }
+              if (isMe && receiverInRoom) {
+                  io.to(req.user._id.toString()).emit("messages-seen", {
+                      chatId: chat._id,
+                      seenTime: newMessage.createdAt
+                  });
+              } else if (isMe && receiverIsOnline) {
+                  io.to(req.user._id.toString()).emit("message-delivered", {
+                      chatId: chat._id,
+                      messageId: newMessage._id,
+                      messageTime: newMessage.createdAt
+                  });
               }
           }
       });
@@ -610,12 +626,12 @@ class ChatController {
       await session.commitTransaction();
       session.endSession();
 
-      // ✅ الـ fix: بنحط isDelivered صح في الـ response
       const formatMsg = (msg) => ({
           ...(msg.toObject ? msg.toObject() : msg),
           sender: undefined,
           isMyMsg: true,
-          isDelivered: receiverIsOnline ? true : (msg.isDelivered ?? false), // ✅
+          isDelivered: receiverInRoom ? true : receiverIsOnline ? true : (msg.isDelivered ?? false),
+          isRead: receiverInRoom ? true : (msg.isRead ?? false),
       });
 
       res.status(201).json({
