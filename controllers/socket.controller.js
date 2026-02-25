@@ -193,7 +193,13 @@ class SocketController {
                     : false
         ));
 
-        if (receiverIsOnline) {
+        const receiverInRoom = !!(chatRoomUsers[chatId] && chatRoomUsers[chatId].has(receiverId));
+
+        if (receiverInRoom) {
+            await Message.findByIdAndUpdate(newMessage._id, { isDelivered: true, isRead: true });
+            newMessage.isDelivered = true;
+            newMessage.isRead = true;
+        } else if (receiverIsOnline) {
             await Message.findByIdAndUpdate(newMessage._id, { isDelivered: true });
             newMessage.isDelivered = true;
         }
@@ -248,7 +254,12 @@ class SocketController {
                 });
             }
 
-            if (isMe && receiverIsOnline) {
+            if (isMe && receiverInRoom) {
+                io.to(userData._id.toString()).emit("messages-seen", {
+                    chatId,
+                    seenTime: newMessage.createdAt
+                });
+            } else if (isMe && receiverIsOnline) {
                 io.to(userData._id.toString()).emit("message-delivered", {
                     chatId,
                     messageId: newMessage._id,
